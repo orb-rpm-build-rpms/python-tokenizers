@@ -1,0 +1,464 @@
+From 6293acfcdf2257972d522d00abb616cb47eb8fc7 Mon Sep 17 00:00:00 2001
+From: "Alexander F. Lent" <lx@xanderlent.com>
+Date: Thu, 29 Jan 2026 01:27:27 -0500
+Subject: [PATCH] Port to PyO3 0.27
+
+---
+ bindings/python/Cargo.toml                   |  8 +--
+ bindings/python/src/decoders.rs              |  8 ++-
+ bindings/python/src/encoding.rs              |  2 +-
+ bindings/python/src/models.rs                |  2 +-
+ bindings/python/src/normalizers.rs           |  2 +-
+ bindings/python/src/pre_tokenizers.rs        |  2 +-
+ bindings/python/src/processors.rs            | 16 +++--
+ bindings/python/src/tokenizer.rs             | 66 ++++++++++++--------
+ bindings/python/src/trainers.rs              | 10 +--
+ bindings/python/src/utils/normalization.rs   |  6 +-
+ bindings/python/src/utils/pretokenization.rs | 17 +++--
+ 11 files changed, 83 insertions(+), 56 deletions(-)
+
+diff --git a/bindings/python/Cargo.toml b/bindings/python/Cargo.toml
+index e53badecc..da4ef3edc 100644
+--- a/bindings/python/Cargo.toml
++++ b/bindings/python/Cargo.toml
+@@ -14,11 +14,11 @@ serde = { version = "1.0", features = ["rc", "derive"] }
+ serde_json = "1.0"
+ libc = "0.2"
+ env_logger = "0.11"
+-pyo3 = { version = "0.26", features = ["abi3", "abi3-py39", "py-clone"] }
+-pyo3-async-runtimes = { version = "0.26", features = ["tokio-runtime"] }
++pyo3 = { version = "0.27", features = ["abi3", "abi3-py39", "py-clone"] }
++pyo3-async-runtimes = { version = "0.27", features = ["tokio-runtime"] }
+ tokio = { version = "1.47.1", features = ["rt", "rt-multi-thread", "macros", "signal"] }
+ once_cell = "1.19.0"
+-numpy = "0.26"
++numpy = "0.27"
+ ndarray = "0.16"
+ itertools = "0.14"
+ ahash = { version = "0.8.11", features = ["serde"] }
+@@ -28,7 +28,7 @@ path = "../../tokenizers"
+ 
+ [dev-dependencies]
+ tempfile = "3.10"
+-pyo3 = { version = "0.26", features = ["auto-initialize"] }
++pyo3 = { version = "0.27", features = ["auto-initialize"] }
+ 
+ [features]
+ default = ["pyo3/extension-module"]
+diff --git a/bindings/python/src/decoders.rs b/bindings/python/src/decoders.rs
+index 2ac1e49ec..811f7c054 100644
+--- a/bindings/python/src/decoders.rs
++++ b/bindings/python/src/decoders.rs
+@@ -98,7 +98,7 @@ impl PyDecoder {
+                 })?;
+                 Ok(())
+             }
+-            Err(e) => Err(e),
++            Err(e) => Err(e.into()),
+         }
+     }
+ 
+@@ -630,8 +630,10 @@ enum StreamInput {
+     Ids(Vec<u32>),
+ }
+ 
+-impl FromPyObject<'_> for StreamInput {
+-    fn extract_bound(obj: &Bound<'_, PyAny>) -> PyResult<Self> {
++impl FromPyObject<'_, '_> for StreamInput {
++    type Error = PyErr;
++
++    fn extract(obj: Borrowed<'_, '_, PyAny>) -> Result<Self, Self::Error> {
+         if let Ok(id) = obj.extract::<u32>() {
+             Ok(StreamInput::Id(id))
+         } else if let Ok(ids) = obj.extract::<Vec<u32>>() {
+diff --git a/bindings/python/src/encoding.rs b/bindings/python/src/encoding.rs
+index 7261bbbbc..37d807139 100644
+--- a/bindings/python/src/encoding.rs
++++ b/bindings/python/src/encoding.rs
+@@ -49,7 +49,7 @@ impl PyEncoding {
+                 })?;
+                 Ok(())
+             }
+-            Err(e) => Err(e),
++            Err(e) => Err(e.into()),
+         }
+     }
+ 
+diff --git a/bindings/python/src/models.rs b/bindings/python/src/models.rs
+index d093fa142..47dbf761f 100644
+--- a/bindings/python/src/models.rs
++++ b/bindings/python/src/models.rs
+@@ -116,7 +116,7 @@ impl PyModel {
+                 })?;
+                 Ok(())
+             }
+-            Err(e) => Err(e),
++            Err(e) => Err(e.into()),
+         }
+     }
+ 
+diff --git a/bindings/python/src/normalizers.rs b/bindings/python/src/normalizers.rs
+index 3c255a5e6..0a97dff68 100644
+--- a/bindings/python/src/normalizers.rs
++++ b/bindings/python/src/normalizers.rs
+@@ -135,7 +135,7 @@ impl PyNormalizer {
+                 })?;
+                 Ok(())
+             }
+-            Err(e) => Err(e),
++            Err(e) => Err(e.into()),
+         }
+     }
+ 
+diff --git a/bindings/python/src/pre_tokenizers.rs b/bindings/python/src/pre_tokenizers.rs
+index d71ec7b33..b2c48e99e 100644
+--- a/bindings/python/src/pre_tokenizers.rs
++++ b/bindings/python/src/pre_tokenizers.rs
+@@ -142,7 +142,7 @@ impl PyPreTokenizer {
+                 self.pretok = unpickled;
+                 Ok(())
+             }
+-            Err(e) => Err(e),
++            Err(e) => Err(e.into()),
+         }
+     }
+ 
+diff --git a/bindings/python/src/processors.rs b/bindings/python/src/processors.rs
+index 3973bd795..a4518899f 100644
+--- a/bindings/python/src/processors.rs
++++ b/bindings/python/src/processors.rs
+@@ -117,7 +117,7 @@ impl PyPostProcessor {
+                 })?;
+                 Ok(())
+             }
+-            Err(e) => Err(e),
++            Err(e) => Err(e.into()),
+         }
+     }
+ 
+@@ -549,13 +549,15 @@ impl From<PySpecialToken> for SpecialToken {
+     }
+ }
+ 
+-impl FromPyObject<'_> for PySpecialToken {
+-    fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
++impl FromPyObject<'_, '_> for PySpecialToken {
++    type Error = PyErr;
++
++    fn extract(ob: Borrowed<'_, '_, PyAny>) -> Result<Self, Self::Error> {
+         if let Ok(v) = ob.extract::<(String, u32)>() {
+             Ok(Self(v.into()))
+         } else if let Ok(v) = ob.extract::<(u32, String)>() {
+             Ok(Self(v.into()))
+-        } else if let Ok(d) = ob.downcast::<PyDict>() {
++        } else if let Ok(d) = ob.cast::<PyDict>() {
+             let id = d
+                 .get_item("id")?
+                 .ok_or_else(|| exceptions::PyValueError::new_err("`id` must be specified"))?
+@@ -589,8 +591,10 @@ impl From<PyTemplate> for Template {
+     }
+ }
+ 
+-impl FromPyObject<'_> for PyTemplate {
+-    fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
++impl FromPyObject<'_, '_> for PyTemplate {
++    type Error = PyErr;
++
++    fn extract(ob: Borrowed<'_, '_, PyAny>) -> Result<Self, Self::Error> {
+         if let Ok(s) = ob.extract::<String>() {
+             Ok(Self(
+                 s.try_into().map_err(exceptions::PyValueError::new_err)?,
+diff --git a/bindings/python/src/tokenizer.rs b/bindings/python/src/tokenizer.rs
+index 0cd06985c..3752b9856 100644
+--- a/bindings/python/src/tokenizer.rs
++++ b/bindings/python/src/tokenizer.rs
+@@ -160,7 +160,7 @@ impl PyAddedToken {
+     }
+ 
+     fn __setstate__(&mut self, py: Python, state: Py<PyAny>) -> PyResult<()> {
+-        match state.downcast_bound::<PyDict>(py) {
++        match state.cast_bound::<PyDict>(py) {
+             Ok(state) => {
+                 for (key, value) in state {
+                     let key: String = key.extract()?;
+@@ -266,8 +266,10 @@ impl PyAddedToken {
+ }
+ 
+ struct TextInputSequence<'s>(tk::InputSequence<'s>);
+-impl<'s> FromPyObject<'s> for TextInputSequence<'s> {
+-    fn extract_bound(ob: &Bound<'s, PyAny>) -> PyResult<Self> {
++impl<'s> FromPyObject<'_, 's> for TextInputSequence<'s> {
++    type Error = PyErr;
++
++    fn extract(ob: Borrowed<'_, 's, PyAny>) -> Result<Self, Self::Error> {
+         let err = exceptions::PyTypeError::new_err("TextInputSequence must be str");
+         if let Ok(s) = ob.extract::<String>() {
+             Ok(Self(s.into()))
+@@ -283,8 +285,10 @@ impl<'s> From<TextInputSequence<'s>> for tk::InputSequence<'s> {
+ }
+ 
+ struct PyArrayUnicode(Vec<String>);
+-impl FromPyObject<'_> for PyArrayUnicode {
+-    fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
++impl FromPyObject<'_, '_> for PyArrayUnicode {
++    type Error = PyErr;
++
++    fn extract(ob: Borrowed<'_, '_, PyAny>) -> Result<Self, Self::Error> {
+         // SAFETY Making sure the pointer is a valid numpy array requires calling numpy C code
+         if unsafe { npyffi::PyArray_Check(ob.py(), ob.as_ptr()) } == 0 {
+             return Err(exceptions::PyTypeError::new_err("Expected an np.array"));
+@@ -352,15 +356,17 @@ impl From<PyArrayUnicode> for tk::InputSequence<'_> {
+ 
+ struct PyArrayStr(Vec<String>);
+ 
+-impl FromPyObject<'_> for PyArrayStr {
+-    fn extract_bound(ob: &Bound<'_, PyAny>) -> PyResult<Self> {
+-        let array = ob.downcast::<PyArray1<Py<PyAny>>>()?;
++impl FromPyObject<'_, '_> for PyArrayStr {
++    type Error = PyErr;
++
++    fn extract(ob: Borrowed<'_, '_, PyAny>) -> Result<Self, Self::Error> {
++        let array = ob.cast::<PyArray1<Py<PyAny>>>()?;
+         let seq = array
+             .readonly()
+             .as_array()
+             .iter()
+             .map(|obj| {
+-                let s = obj.downcast_bound::<PyString>(ob.py())?;
++                let s = obj.cast_bound::<PyString>(ob.py())?;
+                 Ok(s.to_string_lossy().into_owned())
+             })
+             .collect::<PyResult<Vec<_>>>()?;
+@@ -375,20 +381,22 @@ impl From<PyArrayStr> for tk::InputSequence<'_> {
+ }
+ 
+ struct PreTokenizedInputSequence<'s>(tk::InputSequence<'s>);
+-impl<'s> FromPyObject<'s> for PreTokenizedInputSequence<'s> {
+-    fn extract_bound(ob: &Bound<'s, PyAny>) -> PyResult<Self> {
++impl<'s> FromPyObject<'_, 's> for PreTokenizedInputSequence<'s> {
++    type Error = PyErr;
++
++    fn extract(ob: Borrowed<'_, 's, PyAny>) -> Result<Self, Self::Error> {
+         if let Ok(seq) = ob.extract::<PyArrayUnicode>() {
+             return Ok(Self(seq.into()));
+         }
+         if let Ok(seq) = ob.extract::<PyArrayStr>() {
+             return Ok(Self(seq.into()));
+         }
+-        if let Ok(s) = ob.downcast::<PyList>() {
++        if let Ok(s) = ob.cast::<PyList>() {
+             if let Ok(seq) = s.extract::<Vec<String>>() {
+                 return Ok(Self(seq.into()));
+             }
+         }
+-        if let Ok(s) = ob.downcast::<PyTuple>() {
++        if let Ok(s) = ob.cast::<PyTuple>() {
+             if let Ok(seq) = s.extract::<Vec<String>>() {
+                 return Ok(Self(seq.into()));
+             }
+@@ -405,8 +413,10 @@ impl<'s> From<PreTokenizedInputSequence<'s>> for tk::InputSequence<'s> {
+ }
+ 
+ struct TextEncodeInput<'s>(tk::EncodeInput<'s>);
+-impl<'s> FromPyObject<'s> for TextEncodeInput<'s> {
+-    fn extract_bound(ob: &Bound<'s, PyAny>) -> PyResult<Self> {
++impl<'s> FromPyObject<'_, 's> for TextEncodeInput<'s> {
++    type Error = PyErr;
++
++    fn extract(ob: Borrowed<'_, 's, PyAny>) -> Result<Self, Self::Error> {
+         if let Ok(i) = ob.extract::<TextInputSequence>() {
+             return Ok(Self(i.into()));
+         }
+@@ -431,8 +441,10 @@ impl<'s> From<TextEncodeInput<'s>> for tk::tokenizer::EncodeInput<'s> {
+     }
+ }
+ struct PreTokenizedEncodeInput<'s>(tk::EncodeInput<'s>);
+-impl<'s> FromPyObject<'s> for PreTokenizedEncodeInput<'s> {
+-    fn extract_bound(ob: &Bound<'s, PyAny>) -> PyResult<Self> {
++impl<'s> FromPyObject<'_, 's> for PreTokenizedEncodeInput<'s> {
++    type Error = PyErr;
++
++    fn extract(ob: Borrowed<'_, 's, PyAny>) -> Result<Self, Self::Error> {
+         if let Ok(i) = ob.extract::<PreTokenizedInputSequence>() {
+             return Ok(Self(i.into()));
+         }
+@@ -492,10 +504,10 @@ impl PyTokenizer {
+         if let Ok(seq) = ob.extract::<PyArrayStr>() {
+             return Ok(seq.0);
+         }
+-        if let Ok(list) = ob.downcast::<PyList>() {
++        if let Ok(list) = ob.cast::<PyList>() {
+             return list.extract::<Vec<String>>();
+         }
+-        if let Ok(tup) = ob.downcast::<PyTuple>() {
++        if let Ok(tup) = ob.cast::<PyTuple>() {
+             return tup.extract::<Vec<String>>();
+         }
+         Err(exceptions::PyTypeError::new_err(
+@@ -513,7 +525,7 @@ impl PyTokenizer {
+         for it in items {
+             if is_pretokenized {
+                 // Pair?
+-                if let Ok(tup) = it.downcast::<PyTuple>() {
++                if let Ok(tup) = it.cast::<PyTuple>() {
+                     if tup.len() == 2 {
+                         let a = Self::extract_pretok_seq(&tup.get_item(0)?)?;
+                         let b = Self::extract_pretok_seq(&tup.get_item(1)?)?;
+@@ -521,7 +533,7 @@ impl PyTokenizer {
+                         continue;
+                     }
+                 }
+-                if let Ok(lst) = it.downcast::<PyList>() {
++                if let Ok(lst) = it.cast::<PyList>() {
+                     if lst.len() == 2 {
+                         let a = Self::extract_pretok_seq(&lst.get_item(0)?)?;
+                         let b = Self::extract_pretok_seq(&lst.get_item(1)?)?;
+@@ -534,7 +546,7 @@ impl PyTokenizer {
+                 out.push(tk::EncodeInput::Single(a.into()));
+             } else {
+                 // Raw text: pair?
+-                if let Ok(tup) = it.downcast::<PyTuple>() {
++                if let Ok(tup) = it.cast::<PyTuple>() {
+                     if tup.len() == 2 {
+                         let a: String = tup.get_item(0)?.extract()?;
+                         let b: String = tup.get_item(1)?.extract()?;
+@@ -542,10 +554,10 @@ impl PyTokenizer {
+                         continue;
+                     }
+                 }
+-                if let Ok(lst) = it.downcast::<PyList>() {
++                if let Ok(lst) = it.cast::<PyList>() {
+                     if lst.len() == 2
+-                        && lst.get_item(0)?.downcast::<PyString>().is_ok()
+-                        && lst.get_item(1)?.downcast::<PyString>().is_ok()
++                        && lst.get_item(0)?.cast::<PyString>().is_ok()
++                        && lst.get_item(1)?.cast::<PyString>().is_ok()
+                     {
+                         let a: String = lst.get_item(0)?.extract()?;
+                         let b: String = lst.get_item(1)?.extract()?;
+@@ -617,7 +629,7 @@ impl PyTokenizer {
+                 })?;
+                 Ok(())
+             }
+-            Err(e) => Err(e),
++            Err(e) => Err(e.into()),
+         }
+     }
+ 
+@@ -1667,7 +1679,7 @@ impl PyTokenizer {
+                 // Each element of the iterator can either be:
+                 //  - An iterator, to allow batching
+                 //  - A string
+-                if let Ok(s) = element.downcast::<PyString>() {
++                if let Ok(s) = element.cast::<PyString>() {
+                     itertools::Either::Right(std::iter::once(s.to_cow().map(|s| s.into_owned())))
+                 } else {
+                     match element.try_iter() {
+diff --git a/bindings/python/src/trainers.rs b/bindings/python/src/trainers.rs
+index 53415fff0..7a97d8c8a 100644
+--- a/bindings/python/src/trainers.rs
++++ b/bindings/python/src/trainers.rs
+@@ -64,7 +64,7 @@ impl PyTrainer {
+                 self.trainer = unpickled;
+                 Ok(())
+             }
+-            Err(e) => Err(e),
++            Err(e) => Err(e.into()),
+         }
+     }
+ 
+@@ -321,7 +321,7 @@ impl PyBpeTrainer {
+                     "show_progress" => builder = builder.show_progress(val.extract()?),
+                     "special_tokens" => {
+                         builder = builder.special_tokens(
+-                            val.downcast::<PyList>()?
++                            val.cast::<PyList>()?
+                                 .into_iter()
+                                 .map(|token| {
+                                     if let Ok(content) = token.extract::<String>() {
+@@ -528,7 +528,7 @@ impl PyWordPieceTrainer {
+                     "show_progress" => builder = builder.show_progress(val.extract()?),
+                     "special_tokens" => {
+                         builder = builder.special_tokens(
+-                            val.downcast::<PyList>()?
++                            val.cast::<PyList>()?
+                                 .into_iter()
+                                 .map(|token| {
+                                     if let Ok(content) = token.extract::<String>() {
+@@ -678,7 +678,7 @@ impl PyWordLevelTrainer {
+                     }
+                     "special_tokens" => {
+                         builder.special_tokens(
+-                            val.downcast::<PyList>()?
++                            val.cast::<PyList>()?
+                                 .into_iter()
+                                 .map(|token| {
+                                     if let Ok(content) = token.extract::<String>() {
+@@ -851,7 +851,7 @@ impl PyUnigramTrainer {
+                         )
+                     }
+                     "special_tokens" => builder.special_tokens(
+-                        val.downcast::<PyList>()?
++                        val.cast::<PyList>()?
+                             .into_iter()
+                             .map(|token| {
+                                 if let Ok(content) = token.extract::<String>() {
+diff --git a/bindings/python/src/utils/normalization.rs b/bindings/python/src/utils/normalization.rs
+index 5efdd1d13..a766690cd 100644
+--- a/bindings/python/src/utils/normalization.rs
++++ b/bindings/python/src/utils/normalization.rs
+@@ -90,8 +90,10 @@ impl PyRange<'_> {
+ #[derive(Clone)]
+ pub struct PySplitDelimiterBehavior(pub SplitDelimiterBehavior);
+ 
+-impl FromPyObject<'_> for PySplitDelimiterBehavior {
+-    fn extract_bound(obj: &Bound<'_, PyAny>) -> PyResult<Self> {
++impl FromPyObject<'_, '_> for PySplitDelimiterBehavior {
++    type Error = PyErr;
++
++    fn extract(obj: Borrowed<'_, '_, PyAny>) -> Result<Self, Self::Error> {
+         let s = obj.extract::<String>()?;
+ 
+         Ok(Self(match s.as_ref() {
+diff --git a/bindings/python/src/utils/pretokenization.rs b/bindings/python/src/utils/pretokenization.rs
+index 6a14888d3..352b943a0 100644
+--- a/bindings/python/src/utils/pretokenization.rs
++++ b/bindings/python/src/utils/pretokenization.rs
+@@ -56,7 +56,10 @@ fn tokenize(pretok: &mut PreTokenizedString, func: &Bound<'_, PyAny>) -> PyResul
+         ToPyResult(pretok.tokenize(|normalized| {
+             let output = func.call((normalized.get(),), None)?;
+             Ok(output
+-                .extract::<Bound<PyList>>()?
++                .extract::<Bound<PyList>>()
++                .map_err(|casterr| {
++                    Box::new(pyo3::exceptions::PyException::new_err(casterr.to_string()))
++                })
+                 .into_iter()
+                 .map(|obj| Ok(Token::from(obj.extract::<PyToken>()?)))
+                 .collect::<PyResult<Vec<_>>>()?)
+@@ -68,8 +71,10 @@ fn tokenize(pretok: &mut PreTokenizedString, func: &Bound<'_, PyAny>) -> PyResul
+ /// This is an enum
+ #[derive(Clone)]
+ pub struct PyOffsetReferential(OffsetReferential);
+-impl FromPyObject<'_> for PyOffsetReferential {
+-    fn extract_bound(obj: &Bound<'_, PyAny>) -> PyResult<Self> {
++impl FromPyObject<'_, '_> for PyOffsetReferential {
++    type Error = PyErr;
++
++    fn extract(obj: Borrowed<'_, '_, PyAny>) -> Result<Self, Self::Error> {
+         let s = obj.extract::<String>()?;
+ 
+         Ok(Self(match s.as_ref() {
+@@ -84,8 +89,10 @@ impl FromPyObject<'_> for PyOffsetReferential {
+ 
+ #[derive(Clone)]
+ pub struct PyOffsetType(OffsetType);
+-impl FromPyObject<'_> for PyOffsetType {
+-    fn extract_bound(obj: &Bound<'_, PyAny>) -> PyResult<Self> {
++impl FromPyObject<'_, '_> for PyOffsetType {
++    type Error = PyErr;
++
++    fn extract(obj: Borrowed<'_, '_, PyAny>) -> Result<Self, Self::Error> {
+         let s = obj.extract::<String>()?;
+ 
+         Ok(Self(match s.as_ref() {
