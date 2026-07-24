@@ -1,7 +1,7 @@
 %bcond check 1
 # Recent versions of python-datasets require a recent libarrow, so it was not
 # branched to all releases.
-%bcond datasets %[ %{undefined fc43} && %{undefined fc42} ]
+%bcond datasets %{undefined fc43}
 
 Name:           python-tokenizers
 Version:        0.22.2
