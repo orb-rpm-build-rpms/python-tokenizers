@@ -45,15 +45,20 @@ SourceLicense:  Apache-2.0
 License:        %{license_expression}
 URL:            https://github.com/huggingface/tokenizers
 Source:         %{pypi_source tokenizers}
-
-# chore: bump pyo3 to version 0.29 (#2115)
-# https://github.com/huggingface/tokenizers/commit/2032f7fbc5baacbc1bc3c0d1af649b7299fecb90
-# cherry-picked to v0.23.1; re-created on the PyPI sdist
-Patch:          tokenizers-0.23.1-pyo3-0.29.patch
+# Vendored Rust crate graph (./vendor at the archive root), regenerated at build
+# time by rust-sources.sh. F44 does not package the crate versions this release
+# needs (starting with rust-tokenizers 0.23.1 itself), so instead of the cargo
+# buildrequires generator we build the whole graph offline from this tarball.
+# See rust-sources.sh for how it is assembled.
+Source1:        tokenizers-%{version}-vendor.tar.xz
 
 BuildRequires:  python3-devel
 BuildRequires:  cargo-rpm-macros >= 24
-BuildRequires:  tomcli
+# The vendored esaxx-rs crate compiles bundled C++ via cc-rs. Without the cargo
+# buildrequires generator (dropped for the offline vendor build) the compiler is
+# not pulled in automatically, so require it explicitly.
+BuildRequires:  gcc
+BuildRequires:  gcc-c++
 # For tests
 %if %{with datasets}
 BuildRequires:  python3dist(datasets)
@@ -79,34 +84,29 @@ Summary:        %{summary}
 
 
 %prep
-%autosetup -p1 -n tokenizers-%{version}
-%cargo_prep
+# -a1 unpacks the vendor tarball (Source1) into the tree as ./vendor.
+%autosetup -p1 -n tokenizers-%{version} -a1
 # Copy out LICENSE
 cp -a tokenizers/LICENSE LICENSE
-# Remove vendored tokenizers
-rm -r tokenizers/
-# Remove locked versions
-rm bindings/python/Cargo.lock
-# Replace the path-based dependency on the bundled crate with an exact-version
-# dependency.
-tomcli set bindings/python/Cargo.toml del dependencies.tokenizers.path
-tomcli set bindings/python/Cargo.toml str dependencies.tokenizers.version '=%{version}'
+# The bundled ../../tokenizers crate is kept: the binding crate depends on it by
+# path, and cargo vendor leaves path deps in place, so no rust-tokenizers Fedora
+# crate is needed. The sdist's bindings/python/Cargo.lock is kept too, so the
+# vendored build (against that lock) is reproducible.
+# cargo_prep runs at the archive root (where pyproject.toml lives and the wheel
+# build runs). -v vendor builds the crate graph from ./vendor fully offline,
+# replacing the cargo buildrequires generator; cargo discovers this root config
+# from bindings/python too, so the Rust test suite in check finds it.
+%cargo_prep -v vendor
 
 
 %generate_buildrequires
-# Get the cargo buildrequires first, so that maturin will succeed
-cd bindings/python/
-%cargo_generate_buildrequires
-cd ../../
+# The Rust deps come from the vendor tree, so the cargo buildrequires generator
+# is intentionally absent; only the Python build backend requirements remain.
 %pyproject_buildrequires
 
 
 %build
-# Generate the dependency license file first, so maturin will find it
-cd bindings/python/
-%cargo_license_summary
-%{cargo_license} > ../../LICENSE.dependencies
-cd ../../
+export RUSTFLAGS='%{build_rustflags}'
 %pyproject_wheel
 
 
@@ -194,7 +194,6 @@ cd ../../
 %files -n python3-tokenizers -f %{pyproject_files}
 %doc bindings/python/README.md bindings/python/CHANGELOG.md
 %license LICENSE
-%license LICENSE.dependencies
 
 
 %changelog
